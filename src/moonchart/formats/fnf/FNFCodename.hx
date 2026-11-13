@@ -5,9 +5,10 @@ import moonchart.backend.Optimizer;
 import moonchart.backend.Timing;
 import moonchart.backend.Util;
 import moonchart.formats.BasicFormat;
-import moonchart.formats.fnf.FNFGlobal.BasicFNFNoteType;
-import moonchart.formats.fnf.FNFGlobal.FNFNoteTypeResolver;
+import moonchart.formats.fnf.FNFGlobal;
 import moonchart.formats.fnf.legacy.FNFLegacy;
+
+using StringTools;
 
 enum abstract FNFCodenameNoteType(String) from String to String
 {
@@ -28,13 +29,21 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 			extension: "json",
 			hasMetaFile: POSSIBLE,
 			metaFileExtension: "json",
-			specialValues: ['_"codenameChart":', '"strumLines":'],
+			specialValues: [
+				'_"codenameChart":',
+				'_"codenameChart":',
+				'_"codenameChart":',
+				'_"codenameChart":',
+				'"strumLines":'
+			],
 			handler: FNFCodename
 		}
 	}
 
 	public static inline var CODENAME_BPM_CHANGE:String = "BPM Change";
+	public static inline var CODENAME_TIME_SIG_CHANGE:String = "Time Signature Change";
 	public static inline var CODENAME_CAM_MOVEMENT:String = "Camera Movement";
+	public static inline var CODENAME_CAM_POSITION:String = "Camera Position";
 
 	public var noteTypeResolver(default, null):FNFNoteTypeResolver;
 
@@ -73,6 +82,7 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 				strumScale: 1,
 				visible: (i < 2),
 				type: i,
+				keyCount: 4, // TODO
 				characters: [
 					switch (i)
 					{
@@ -122,18 +132,7 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 
 		for (i in 0...basicEvents.length)
 		{
-			final event = basicEvents[i];
-			final isFocus:Bool = event.name != CODENAME_CAM_MOVEMENT && FNFGlobal.isCamFocus(event);
-
-			Util.setArray(events, i, isFocus ? {
-				time: event.time,
-				name: CODENAME_CAM_MOVEMENT,
-				params: [resolveCamFocus(event)]
-			} : {
-				time: event.time,
-				name: event.name,
-				params: Util.resolveEventValues(event.data)
-				});
+			Util.setArray(events, i, resolveCodenameEvent(basicEvents[i]));
 		}
 
 		// Push bpm change events
@@ -146,6 +145,11 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 				time: bpmChange.time,
 				name: CODENAME_BPM_CHANGE,
 				params: [bpmChange.bpm]
+			});
+			events.push({
+				time: bpmChange.time,
+				name: CODENAME_TIME_SIG_CHANGE,
+				params: [bpmChange.beatsPerMeasure, bpmChange.stepsPerBeat]
 			});
 		}
 
@@ -184,14 +188,132 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 		return this;
 	}
 
-	function resolveCamFocus(event:BasicEvent):Int
+	function resolveCodenameEvent(event:BasicEvent):FNFCodenameEvent
 	{
-		return switch (FNFGlobal.resolveCamFocus(event))
+		final isFocus:Bool = event.name != CODENAME_CAM_MOVEMENT && FNFGlobal.isCamFocus(event);
+
+		if (isFocus)
+		{
+			return resolveCamFocus(event);
+		}
+
+		switch (event.name)
+		{
+			case BasicFNFEvent.PLAY_ANIMATION:
+				var data:BasicFNFPlayAnimEvent = event.data;
+				var target:Int = switch (data.target)
+				{
+					case 'boyfriend' | 'bf' | 'player': 1;
+					case 'dad' | 'opponent': 0;
+					default: 2;
+				}
+				return {
+					time: event.time,
+					name: "Play Animation",
+					params: [target, data.anim, data.force]
+				}
+
+			case BasicFNFEvent.ZOOM_CAMERA:
+				var data:BasicFNFZoomCameraEvent = event.data;
+
+				var easing = resolveEase(data.ease, "linear");
+
+				return {
+					time: event.time,
+					name: "Camera Zoom",
+					params: [
+						data.ease != "INSTANT",
+						data.zoom,
+						"camGame",
+						data.duration,
+						easing[0],
+						easing[1]
+					] // TODO: add missing params
+				}
+
+			case BasicFNFEvent.POSITION_CAMERA:
+				var data:BasicFNFPositionCameraEvent = event.data;
+
+				var easing = resolveEase(data.ease);
+
+				return {
+					time: event.time,
+					name: "Camera Position",
+					params: [
+						data.x,
+						data.y,
+						data.ease != "INSTANT",
+						data.duration,
+						easing[0],
+						easing[1],
+						data.isOffset
+					]
+				}
+
+			case BasicFNFEvent.SET_CAMERA_BOP:
+				var data:BasicFNFSetCameraBopEvent = event.data;
+				return {
+					time: event.time,
+					name: "Camera Modulo Change",
+					params: [data.rate, data.intensity]
+				}
+		}
+
+		return {
+			time: event.time,
+			name: event.name,
+			params: Util.resolveEventValues(event)
+		}
+	}
+
+	function resolveCamFocus(event:BasicEvent):FNFCodenameEvent
+	{
+		var isPosition:Bool = false;
+		final char:Int = switch (FNFGlobal.resolveCamFocus(event))
 		{
 			case DAD: 0;
 			case BF: 1;
 			case GF: 2;
+			case -1:
+				isPosition = true;
+				-1;
+			default: 2;
 		}
+
+		final easing:Array<String> = resolveEase(event.data.ease);
+
+		final duration:Int = event.data.duration ?? 4;
+		final doLerp:Bool = easing[0] != "INSTANT";
+
+		// character(int), lerp(bool), duration(int), ease(string), easeSuffix(?string)
+
+		// TODO: add "Camera Position" event
+
+		return {
+			time: event.time,
+			name: CODENAME_CAM_MOVEMENT,
+			params: [char, doLerp, duration, easing[0], easing[1]]
+		}
+	}
+
+	function resolveEase(ease:String, defaultEase:String = "CLASSIC"):Array<String>
+	{
+		var easeDir:String = "";
+
+		var easeCheck:String = ease.toLowerCase();
+		if (easeCheck.endsWith("in"))
+			easeDir = "In";
+		else if (easeCheck.endsWith("inout"))
+			easeDir = "InOut";
+		else if (easeCheck.endsWith("out"))
+			easeDir = "Out";
+
+		var easing:Array<String> = [ease.substr(0, ease.length - easeDir.length), easeDir];
+
+		if (easing[0] == null || easing[0] == "")
+			easing[0] = "linear"; // default to classic camera movement ease
+
+		return easing;
 	}
 
 	inline function formatSongName(name:String):String
@@ -246,14 +368,37 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 		return noteTypeResolver.toBasic(noteType);
 	}
 
+	function encodeCodenameEvent(event:FNFCodenameEvent):BasicEvent
+	{
+		var time:Float = event.time;
+		switch (event.name)
+		{
+			case FNFCodename.CODENAME_CAM_POSITION:
+				var data:BasicFNFPositionCameraEvent = {
+					char: -1,
+					x: event.params[0],
+					y: event.params[1],
+					ease: (event.params[2]) ? ((event.params[4] ?? "linear") + (event.params[5] ?? "")) : "CLASSIC",
+					duration: (event.params[2]) ? event.params[3] : 0,
+					isOffset: event.params[6]
+				};
+				return {
+					time: time,
+					name: BasicFNFEvent.POSITION_CAMERA,
+					data: data
+				}
+		}
+		return Util.makeArrayEvent(time, event.name, event.params);
+	}
+
 	override function getEvents():Array<BasicEvent>
 	{
 		var events:Array<BasicEvent> = [];
 
 		for (event in data.events)
 		{
-			if (event.name != CODENAME_BPM_CHANGE)
-				events.push(Util.makeArrayEvent(event.time, event.name, event.params));
+			if (event.name != CODENAME_BPM_CHANGE && event.name != CODENAME_TIME_SIG_CHANGE)
+				events.push(encodeCodenameEvent(event));
 		}
 
 		// Set the default init cam movement
@@ -290,24 +435,89 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 			}
 		];
 
+		final bpmEvents = data.events.filter((e) -> e.name == CODENAME_BPM_CHANGE);
+		bpmEvents.sort((a, b) -> return Util.sortValues(a.time, b.time));
+
+		final timeSigEvents = data.events.filter((e) -> e.name == CODENAME_TIME_SIG_CHANGE);
+		timeSigEvents.sort((a, b) -> return Util.sortValues(a.time, b.time));
+
+		// TODO: should i not do "function in function" syntax here?
+		function getBPMAtMS(ms:Float):Float
+		{
+			var output = null;
+			for (i in 0...bpmEvents.length)
+			{
+				var point = bpmEvents[i];
+				if (ms >= point.time)
+					output = point;
+			}
+			return output?.params[0] ?? meta.bpm; // I LOVE YOU NULL COLE E ASSING
+		}
+		function getTimeSigAtMS(ms:Float):Array<Float>
+		{
+			var output = null;
+			for (i in 0...timeSigEvents.length)
+			{
+				var point = timeSigEvents[i];
+				if (ms >= point.time)
+					output = point;
+			}
+			if (output?.params != null)
+			{
+				return [
+					output.params[0],
+					(output.params[2])
+					? output.params[1] : Math.floor(16 / output.params[1])
+				];
+			}
+			return [meta.beatsPerMeasure, meta.stepsPerBeat]; // I LOVE YOU NULL COLE E ASSING
+		}
+
 		for (event in data.events)
 		{
-			if (event.name == CODENAME_BPM_CHANGE)
+			switch (event.name)
 			{
-				bpmChanges.push({
-					time: event.time,
-					bpm: event.params[0],
-					stepsPerBeat: meta.stepsPerBeat,
-					beatsPerMeasure: meta.beatsPerMeasure
-				});
+				case CODENAME_BPM_CHANGE:
+					var appropriateTimeSig = getTimeSigAtMS(event.time);
+					bpmChanges.push({
+						time: event.time,
+						bpm: event.params[0],
+						stepsPerBeat: appropriateTimeSig[1],
+						beatsPerMeasure: appropriateTimeSig[0]
+					});
+
+				case CODENAME_TIME_SIG_CHANGE:
+					var appropriateBPM = getBPMAtMS(event.time);
+					bpmChanges.push({
+						time: event.time,
+						bpm: appropriateBPM,
+						stepsPerBeat: (event.params[2]) ? event.params[1] : Math.floor(16 / event.params[1]),
+						beatsPerMeasure: event.params[0]
+					});
 			}
 		}
 
 		Timing.sortBPMChanges(bpmChanges);
 
+		var lanesLength:Int = 0;
+		var strumlineLanes:Int = 0;
+		var strumlineKeys:Array<Int> = [];
+
+		for (lane in data.strumLines)
+		{
+			if (!lane.visible)
+				continue;
+
+			var keys = lane.keyCount ?? 4;
+			strumlineKeys.push(keys);
+			lanesLength += keys;
+			strumlineLanes++;
+		}
+
 		return {
 			title: meta.displayName,
 			bpmChanges: bpmChanges,
+			scrollVelocities: [],
 			offset: 0.0,
 			scrollSpeeds: [diffs[0] => data.scrollSpeed],
 			extraData: [
@@ -316,9 +526,13 @@ class FNFCodename extends BasicJsonFormat<FNFCodenameFormat, FNFCodenameMeta>
 				PLAYER_3 => getStrumline("girlfriend")?.characters[0] ?? "bf",
 				SONG_ARTIST => meta?.customValues?.composers ?? Moonchart.DEFAULT_ARTIST,
 				SONG_CHARTER => meta?.customValues?.charters ?? Moonchart.DEFAULT_CHARTER,
-				STAGE => data.stage
+				STAGE => data.stage,
+
+				LANES_LENGTH => lanesLength,
+				STRUMLINE_LANES => strumlineLanes,
+				STRUMLINE_KEYS => strumlineKeys
 			]
-		}
+		};
 	}
 
 	public override function fromFile(path:String, ?meta:String, ?diff:FormatDifficulty):FNFCodename
@@ -360,7 +574,8 @@ typedef FNFCodenameStrumline =
 	strumPos:Array<Float>,
 	strumLinePos:Float,
 	vocalsSuffix:String,
-	notes:Array<FNFCodenameNote>
+	notes:Array<FNFCodenameNote>,
+	keyCount:Int,
 }
 
 typedef FNFCodenameNote =

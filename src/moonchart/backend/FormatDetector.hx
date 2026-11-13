@@ -172,6 +172,14 @@ class FormatDetector
 		settings = resolveSettings(settings);
 
 		final files:Array<String> = inputFiles.resolve();
+
+		for (possibleFile in files)
+		{
+			if (!Util.fileExists(possibleFile))
+			{
+				files.remove(possibleFile);
+			}
+		}
 		var possibleFormats:Array<Format> = settings.possibleFormats;
 
 		var hasMeta:Bool = (files.length > 1);
@@ -182,11 +190,15 @@ class FormatDetector
 		{
 			isFolder = false;
 		}
-		else
+		else if (files.length == 1)
 		{
 			// Folder charts are forced to have meta
 			isFolder = Util.isFolder(files[0]);
 			hasMeta = isFolder;
+		}
+		else
+		{
+			throw 'Not enough files found for input: $inputFiles';
 		}
 
 		fileExtension = (isFolder ? "" : Path.extension(files[0]));
@@ -433,14 +445,20 @@ class FormatDetector
 		var specialValues:Array<String> = data.specialValues;
 		var formatSuper:String = '';
 
+		final classFormatPostfixes:Array<String> = ["Basic", "Meta"];
+
 		// find a valid super class
 		var tmpClass = formatClass;
 		while (true)
 		{
 			var superClass = Type.getSuperClass(tmpClass);
 			formatSuper = Type.getClassName(superClass);
-			if (formatSuper.endsWith('Basic'))
-				formatSuper = formatSuper.substr(0, formatSuper.length - 5);
+
+			for (postfix in classFormatPostfixes)
+			{
+				if (formatSuper.endsWith(postfix))
+					formatSuper = formatSuper.substr(0, formatSuper.length - postfix.length);
+			}
 
 			if (formatSuper != Type.getClassName(formatClass))
 				break;

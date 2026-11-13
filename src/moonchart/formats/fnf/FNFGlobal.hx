@@ -29,6 +29,52 @@ enum abstract BasicFNFCamFocus(Int) from Int to Int
 	var GF = 2;
 }
 
+typedef BasicFNFCamFocusData =
+{
+	char:BasicFNFCamFocus,
+	ease:String,
+}
+
+enum abstract BasicFNFEvent(String) from String to String
+{
+	var PLAY_ANIMATION;
+	var ZOOM_CAMERA;
+	var POSITION_CAMERA;
+	var SET_CAMERA_BOP;
+}
+
+typedef BasicFNFPlayAnimEvent =
+{
+	var target:String;
+	var anim:String;
+	var force:Bool;
+}
+
+typedef BasicFNFZoomCameraEvent =
+{
+	var zoom:Float;
+	var duration:Float;
+	var ease:String;
+	var mode:String;
+}
+
+typedef BasicFNFSetCameraBopEvent =
+{
+	var rate:Int;
+	var offset:Int;
+	var intensity:Float;
+}
+
+typedef BasicFNFPositionCameraEvent =
+{
+	var char:Int;
+	var x:Float;
+	var y:Float;
+	var ease:String;
+	var duration:Float;
+	var isOffset:Bool;
+}
+
 /**
  * This class is **NOT** a Moonchart format, its made as a linker between other FNF formats
  * Since FNF formats have a lot of shared data but different ways to represent it

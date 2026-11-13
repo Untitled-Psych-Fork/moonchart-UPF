@@ -322,10 +322,13 @@ class GuitarHero extends BasicFormat<GuitarHeroFormat, {}>
 		return {
 			title: data.Song.Name,
 			bpmChanges: bpmChanges,
+			scrollVelocities: [],
 			scrollSpeeds: [],
 			offset: data.Song.Offset * 1000,
 			extraData: [
 				LANES_LENGTH => foundLanesLength,
+				STRUMLINE_KEYS => foundLanesLength,
+				STRUMLINE_LANES => 1,
 				SONG_ARTIST => data.Song.Artist,
 				SONG_CHARTER => data.Song.Charter,
 				SONG_ALBUM => data.Song.Album

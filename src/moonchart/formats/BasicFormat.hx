@@ -33,6 +33,11 @@ typedef BasicBPMChange = BasicTimingObject &
 	stepsPerBeat:Float // denominator
 }
 
+typedef BasicScrollVelocity = BasicTimingObject & 
+{
+	multiplier:Float
+}
+
 typedef BasicMeasure =
 {
 	notes:Array<BasicNote>, // Notes inside of the measure
@@ -65,10 +70,12 @@ typedef BasicMetaData =
 {
 	title:String,
 	bpmChanges:Array<BasicBPMChange>,
+	scrollVelocities:Array<BasicScrollVelocity>,
 	scrollSpeeds:Map<String, Float>,
 	offset:Float,
 	extraData:Map<String, Dynamic>, // Mainly for extra bullshit variables that may not exist among all formats
-	?inputFormats:Array<Format> // NOTE: Only added on ``getFormat`` at the moment
+	?inputFormats:Array<Format>, // NOTE: Only added on ``getFormat`` at the moment
+	?inputInstances:Array<DynamicFormat> // NOTE: Only added on ``getFormat`` at the moment
 }
 
 enum abstract BasicNoteType(String) from String to String
@@ -76,6 +83,7 @@ enum abstract BasicNoteType(String) from String to String
 	var DEFAULT = "";
 	var ROLL;
 	var MINE;
+	var FAKE;
 }
 
 enum abstract TimeFormat(Int)
@@ -89,7 +97,9 @@ enum abstract TimeFormat(Int)
 enum abstract BasicMetaValues(String) from String to String
 {
 	var LANES_LENGTH; // usually 4 or 8
-	// var STRUMLINES_LENGTH; TODO: add this metadata for better lane data control
+	var STRUMLINE_LANES; // individual number of strumlines, usually 1 or 2, can be int or array int
+	var STRUMLINE_KEYS; // individual number of keys per strumline, usually 4, can be int or array int
+
 	var AUDIO_FILE;
 	var SONG_ARTIST;
 	var SONG_ALBUM;
@@ -142,12 +152,12 @@ abstract class BasicFormat<D, M>
 	/**
 	 * Format instance data.
 	 */
-	public var data:D;
+	public var data(default, set):D;
 
 	/**
 	 * Format instance metadata.
 	 */
-	public var meta:M;
+	public var meta(default, set):M;
 
 	/**
 	 * Format instance difficulties.
@@ -262,10 +272,12 @@ abstract class BasicFormat<D, M>
 			meta: {
 				title: first.meta.title,
 				bpmChanges: Timing.cleanBPMChanges(first.meta.bpmChanges),
+				scrollVelocities: first.meta.scrollVelocities,
 				scrollSpeeds: formatSpeeds,
 				offset: first.meta.offset,
 				extraData: first.meta.extraData,
-				inputFormats: inputFormats
+				inputFormats: inputFormats,
+				inputInstances: formats
 			}
 		}
 
@@ -522,6 +534,18 @@ abstract class BasicFormat<D, M>
 			diffs: pushedDiffs,
 			notes: chartNotes
 		}
+	}
+
+	// Adding these for customization sake
+
+	function set_data(v):D
+	{
+		return data = v;
+	}
+
+	function set_meta(v):M
+	{
+		return meta = v;
 	}
 }
 

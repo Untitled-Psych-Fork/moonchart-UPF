@@ -1,11 +1,14 @@
 package moonchart.formats.fnf.legacy;
 
+import haxe.Json;
 import moonchart.backend.FormatData;
 import moonchart.backend.Timing;
 import moonchart.backend.Util;
 import moonchart.formats.BasicFormat;
 import moonchart.formats.fnf.FNFGlobal;
 import moonchart.formats.fnf.legacy.FNFLegacy;
+
+using StringTools;
 
 enum abstract FNFPsychEvent(String) from String to String
 {
@@ -36,12 +39,38 @@ class FNFPsych extends FNFPsychBasic<PsychJsonFormat>
 			handler: FNFPsych
 		}
 	}
+
+	override function fromJson(data:String, ?meta:String, ?diff:FormatDifficulty):FNFPsych
+	{
+		return cast super.fromJson(data, meta, diff);
+	}
 }
 
 @:private
 @:noCompletion
-class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyBasic<T>
+class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyMetaBasic<T, {song:T}>
 {
+	/**
+	 * If to stack the values of events with more than 2 values due to psych's 2 value event limit.
+	 * Turn it off to limit your values to just the first 2 found in the data array.
+	 * The string separator for the stacked events is accesible through ``stackEventsSeparator``.
+	 */
+	public var stackEvents:Bool = true;
+
+	/**
+	 * String separator used when a event is stacked.
+	 * Set to ``","`` by default.
+	 * Only used if ``stackEvents`` is true.
+	 */
+	public var stackEventsSeparator:String = ",";
+
+	/**
+	 * If to use the legacy Psych engine format for output.
+	 * Turn off to use the Psych V1 chart format.
+	 * Turned on by default.
+	 */
+	public var legacyExport:Bool = true;
+
 	public function new(?data:T)
 	{
 		super(data);
@@ -57,12 +86,46 @@ class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyBasic<T>
 
 	function resolvePsychEvent(event:BasicEvent):PsychEvent
 	{
-		var values:Array<Dynamic> = Util.resolveEventValues(event);
+		// resolve basic fnf events
+		switch (event.name)
+		{
+			case BasicFNFEvent.PLAY_ANIMATION:
+				var data:BasicFNFPlayAnimEvent = event.data;
 
-		var value1:String = Std.string(values[0] ?? "");
-		var value2:String = Std.string(values[1] ?? "");
+				if (data.anim == "hey")
+				{
+					return makePsychEvent(event.time, "Hey!", data.target, "");
+				}
 
-		return [event.time, [[event.name, value1, value2]]];
+				return makePsychEvent(event.time, "Play Animation", data.anim, data.target);
+
+			case BasicFNFEvent.POSITION_CAMERA:
+				var data:BasicFNFPositionCameraEvent = event.data;
+				return makePsychEvent(event.time, "Camera Follow Pos", Std.string(data.x), Std.string(data.y));
+		}
+
+		final values:Array<Dynamic> = Util.resolveEventValues(event);
+		var value1:String = "";
+		var value2:String = "";
+
+		if (stackEvents && values.length > 2)
+		{
+			value1 = values.join(stackEventsSeparator);
+		}
+		else
+		{
+			if (values[0] != null)
+				value1 = Std.string(values[0]);
+			if (values[1] != null)
+				value2 = Std.string(values[1]);
+		}
+
+		return makePsychEvent(event.time, event.name, value1, value2);
+	}
+
+	function makePsychEvent(time:Float, name:String, value1:String, value2:String):PsychEvent
+	{
+		return [time, [[name, value1, value2]]];
 	}
 
 	// TODO: add GF_SECTION event inputs
@@ -72,13 +135,34 @@ class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyBasic<T>
 		var song = basic.data.song;
 
 		var chartEvents = chart.data.events;
-		var psychEvents:Array<PsychEvent> = Util.makeArray(chartEvents.length);
+		var psychEvents:Array<PsychEvent> = [];
 		song.events = psychEvents;
 
-		for (i in 0...chartEvents.length)
+		var lastTime:Float = -1;
+		var eventsGroup:Array<PsychEvent> = [];
+
+		final closePsychEventPack = function()
 		{
-			Util.setArray(psychEvents, i, resolvePsychEvent(chartEvents[i]));
+			if (eventsGroup.length > 0)
+			{
+				var psychEvent:PsychEvent = [lastTime, [for (psychEvent in eventsGroup) psychEvent.pack[0]]];
+				psychEvents.push(psychEvent);
+				eventsGroup.resize(0);
+			}
 		}
+
+		for (basicEvent in chartEvents)
+		{
+			if (Timing.roundFloat(basicEvent.time) != lastTime)
+			{
+				closePsychEventPack();
+				lastTime = Timing.roundFloat(basicEvent.time);
+			}
+
+			eventsGroup.push(resolvePsychEvent(basicEvent));
+		}
+
+		closePsychEventPack();
 
 		song.gfVersion = chart.meta.extraData.get(PLAYER_3) ?? "gf";
 		song.stage = chart.meta.extraData.get(STAGE) ?? "stage";
@@ -111,19 +195,64 @@ class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyBasic<T>
 			var pack:Array<PackedPsychEvent> = baseEvent.pack;
 			for (event in pack)
 			{
-				events.push({
-					time: time,
-					name: event.name,
-					data: {
-						VALUE_1: event.value1,
-						VALUE_2: event.value2
-					}
-				});
+				events.push(encodePackedPsychEvent(event, time));
 			}
 		}
 
 		Timing.sortEvents(events);
 		return events;
+	}
+
+	function encodePackedPsychEvent(event:PackedPsychEvent, time:Float):BasicEvent
+	{
+		switch (event.name)
+		{
+			case "Play Animation":
+				var target:String = event.value2.toLowerCase().trim();
+
+				switch (target)
+				{
+					case '0': target = 'dad';
+					case '1': target = 'bf';
+					case '2': target = 'gf';
+				}
+
+				var data:BasicFNFPlayAnimEvent = {
+					target: target,
+					anim: event.value1,
+					force: true
+				}
+
+				return {
+					time: time,
+					name: BasicFNFEvent.PLAY_ANIMATION,
+					data: data
+				}
+
+			case "Camera Follow Pos":
+				var data:BasicFNFPositionCameraEvent = {
+					char: -1,
+					x: Std.parseFloat(event.value1),
+					y: Std.parseFloat(event.value2),
+					ease: "CLASSIC",
+					duration: 0, // ease doesn't matter on the CLASSIC ease
+					isOffset: false
+				}
+				return {
+					time: time,
+					name: BasicFNFEvent.POSITION_CAMERA,
+					data: data
+				}
+		}
+
+		return {
+			time: time,
+			name: event.name,
+			data: {
+				VALUE_1: event.value1,
+				VALUE_2: event.value2
+			}
+		}
 	}
 
 	override function filterEvents(events:Array<BasicEvent>):Array<BasicEvent>
@@ -150,19 +279,134 @@ class FNFPsychBasic<T:PsychJsonFormat> extends FNFLegacyBasic<T>
 		return meta;
 	}
 
+	var psychOutputFormat:String = "psych_v1";
+	var legacyPsychOutputFormat:String = "psych_v1_convert";
+
+	override function stringify():FormatStringify
+	{
+		var psychData:Dynamic = data;
+
+		if (legacyExport)
+		{
+			data.song.format = legacyPsychOutputFormat;
+		}
+		else
+		{
+			data.song.format = psychOutputFormat;
+			psychData = data.song;
+		}
+
+		return {
+			data: psychData != null ? Json.stringify(psychData, formatting) : null,
+			meta: meta != null ? Json.stringify(meta, formatting) : null
+		}
+	}
+
 	override function fromJson(data:String, ?meta:String, ?diff:FormatDifficulty):FNFPsychBasic<T>
 	{
 		super.fromJson(data, meta, diff);
 
-		// Support for Psych 1.0 format
-		if (this.data.song is String)
+		// Support check for Psych 1.0 format
+		final hasPsychV1Format = (data:Dynamic) ->
+		{
+			var format = data.format;
+			if (format != null && format == "psych_v1")
+				return true;
+
+			return data.song is String;
+		}
+
+		if (hasPsychV1Format(this.data))
 		{
 			this.data = {song: cast this.data};
 			offsetMustHits = false;
 		}
 
-		updateEvents(this.data.song, (meta != null) ? this.meta.song : null);
+		if (this.meta != null && hasPsychV1Format(this.meta))
+		{
+			this.meta = {song: cast this.meta};
+		}
+
+		updateEvents(this.data.song, this.meta?.song);
 		return this;
+	}
+
+	override function resolveBasicMeasure(measure:BasicMeasure, section:FNFLegacySection, list:Array<FNFLegacySection>)
+	{
+		final section:PsychSection = cast section;
+
+		section.sectionBeats = section.lengthInSteps / 4;
+		Reflect.deleteField(section, "lengthInSteps");
+
+		if (!section.altAnim)
+		{
+			Reflect.deleteField(section, "altAnim");
+		}
+
+		if (!section.changeBPM)
+		{
+			Reflect.deleteField(section, "bpm");
+			Reflect.deleteField(section, "changeBPM");
+		}
+
+		if (measure.bpmChanges.length > 1)
+		{
+			// divide multiple bpm changes inside one measure into multiple smaller measures
+			// may have to add a check if to do this or not
+			// idk how "recent" sectionsBeats was in the psych format
+
+			var lastChange = measure.bpmChanges[0];
+			var pushedBeats:Float = 0.0;
+
+			for (i in 1...measure.bpmChanges.length)
+			{
+				var nextChange = measure.bpmChanges[i];
+
+				var elapsed = nextChange.time - lastChange.time;
+				var elapsedBeats = Timing.roundFloat(elapsed / Timing.crochet(lastChange.bpm));
+
+				var sectionNotes:Array<FNFLegacyNote> = [];
+				while (section.sectionNotes.length > 0 && section.sectionNotes[0].time < nextChange.time)
+				{
+					sectionNotes.push(section.sectionNotes.shift());
+				}
+
+				var newSection:PsychSection = {
+					sectionNotes: sectionNotes,
+					mustHitSection: section.mustHitSection,
+					changeBPM: true,
+					bpm: lastChange.bpm,
+					sectionBeats: elapsedBeats
+				};
+
+				super.resolveBasicMeasure(measure, newSection, list);
+
+				pushedBeats += elapsedBeats;
+				lastChange = nextChange;
+			}
+
+			// add missing shit from the last change
+			var sectionNotes:Array<FNFLegacyNote> = [];
+			while (section.sectionNotes.length > 0)
+			{
+				sectionNotes.push(section.sectionNotes.shift());
+			}
+
+			var lastElapsedBeats:Float = Timing.roundFloat(section.sectionBeats - pushedBeats);
+			var newSection:PsychSection = {
+				sectionNotes: sectionNotes,
+				mustHitSection: section.mustHitSection,
+				changeBPM: true,
+				bpm: lastChange.bpm,
+				sectionBeats: lastElapsedBeats
+			};
+
+			super.resolveBasicMeasure(measure, newSection, list);
+		}
+		else
+		{
+			super.resolveBasicMeasure(measure, section, list);
+		}
 	}
 
 	override function sectionBeats(?section:FNFLegacySection):Float
@@ -243,6 +487,8 @@ typedef PsychSection = FNFLegacySection &
 
 typedef PsychJsonFormat = FNFLegacyFormat &
 {
+	?format:String,
+
 	?events:Array<PsychEvent>,
 	?gfVersion:String,
 	stage:String,
