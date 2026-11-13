@@ -18,9 +18,11 @@ enum abstract Format(String) from String to String
 	var FNF_LEGACY_PSYCH;
 	var FNF_LEGACY_TROLL;
 	var FNF_LEGACY_FPS_PLUS;
+	var FNF_LEGACY_DOIDO;
 	var FNF_KADE;
 	var FNF_MARU;
 	var FNF_CODENAME;
+	var FNF_IMAGINATIVE;
 	var FNF_LUDUM_DARE;
 	var FNF_VSLICE;
 	var GUITAR_HERO;
@@ -41,9 +43,11 @@ enum abstract Format(String) from String to String
 			FNFPsych.__getFormat(),
 			FNFTroll.__getFormat(),
 			FNFFpsPlus.__getFormat(),
+			FNFDoido.__getFormat(),
 			FNFKade.__getFormat(),
 			FNFMaru.__getFormat(),
 			FNFCodename.__getFormat(),
+			FNFImaginative.__getFormat(),
 			FNFLudumDare.__getFormat(),
 			FNFVSlice.__getFormat(),
 			GuitarHero.__getFormat(),
